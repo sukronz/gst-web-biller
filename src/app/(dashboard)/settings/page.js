@@ -1,6 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
+import { verifyGSTINOnline } from '@/lib/gstin';
 
 export default function SettingsPage() {
   const [profile, setProfile] = useState({
@@ -10,6 +11,8 @@ export default function SettingsPage() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedMessage, setSavedMessage] = useState(false);
+  const [verifyingGstin, setVerifyingGstin] = useState(false);
+  const [gstinMessage, setGstinMessage] = useState(null);
 
   useEffect(() => {
     async function loadProfile() {
@@ -25,6 +28,42 @@ export default function SettingsPage() {
     }
     loadProfile();
   }, []);
+
+  const handleVerifyGSTIN = async () => {
+    if (!profile.gstin) {
+      setGstinMessage({ type: 'error', text: 'Please enter a 15-character GSTIN to verify.' });
+      return;
+    }
+
+    setVerifyingGstin(true);
+    setGstinMessage(null);
+
+    const result = await verifyGSTINOnline(profile.gstin);
+    setVerifyingGstin(false);
+
+    if (result.valid) {
+      const name = result.tradeName || result.legalName;
+      setGstinMessage({
+        type: 'success',
+        text: `✓ Verified (${result.status || 'Active'}). Details auto-filled!`
+      });
+
+      setProfile(prev => ({
+        ...prev,
+        business_name: name || prev.business_name,
+        pan: result.pan || prev.pan,
+        state: result.state || prev.state,
+        city: result.city || prev.city,
+        address: result.address || prev.address,
+        pin: result.pincode || prev.pin
+      }));
+    } else {
+      setGstinMessage({
+        type: 'error',
+        text: result.error || 'Invalid GSTIN format or checksum.'
+      });
+    }
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -71,20 +110,49 @@ export default function SettingsPage() {
         {/* Business details */}
         <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
           <h4>Business Identity</h4>
-          <div className="input-group">
-            <label>Business Name *</label>
-            <input type="text" className="input" required value={profile.business_name} onChange={e => setProfile({...profile, business_name: e.target.value})} placeholder="Acme Technologies Pvt Ltd" />
-          </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
             <div className="input-group">
               <label>GSTIN</label>
-              <input type="text" className="input" value={profile.gstin} onChange={e => setProfile({...profile, gstin: e.target.value.toUpperCase()})} placeholder="27AAAAA0000A1Z5" />
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <input
+                  type="text"
+                  className="input"
+                  value={profile.gstin}
+                  onChange={e => setProfile({...profile, gstin: e.target.value.toUpperCase()})}
+                  placeholder="27AAAAA0000A1Z5"
+                  maxLength={15}
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  onClick={handleVerifyGSTIN}
+                  disabled={verifyingGstin || !profile.gstin}
+                  style={{ whiteSpace: 'nowrap' }}
+                >
+                  {verifyingGstin ? 'Verifying...' : 'Verify'}
+                </button>
+              </div>
+              {gstinMessage && (
+                <span style={{
+                  fontSize: '0.75rem',
+                  marginTop: '0.25rem',
+                  color: gstinMessage.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                  fontWeight: 600
+                }}>
+                  {gstinMessage.text}
+                </span>
+              )}
             </div>
             <div className="input-group">
               <label>PAN Number</label>
               <input type="text" className="input" value={profile.pan} onChange={e => setProfile({...profile, pan: e.target.value.toUpperCase()})} placeholder="AAAAA0000A" />
             </div>
+          </div>
+
+          <div className="input-group">
+            <label>Business Name *</label>
+            <input type="text" className="input" required value={profile.business_name} onChange={e => setProfile({...profile, business_name: e.target.value})} placeholder="Acme Technologies Pvt Ltd" />
           </div>
 
           <div className="input-group">

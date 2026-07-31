@@ -1,11 +1,15 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
+import { verifyGSTINOnline } from '@/lib/gstin';
 
 export default function ClientsPage() {
   const [clients, setClients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [verifyingGstin, setVerifyingGstin] = useState(false);
+  const [gstinMessage, setGstinMessage] = useState(null);
+
   const [form, setForm] = useState({
     name: '', address: '', city: '', state: '', pin: '', country: 'India', gstin: '', email: '', phone: '', is_sez: false
   });
@@ -24,6 +28,42 @@ export default function ClientsPage() {
 
   useEffect(() => { loadClients(); }, []);
 
+  const handleVerifyGSTIN = async () => {
+    if (!form.gstin) {
+      setGstinMessage({ type: 'error', text: 'Please enter a 15-character GSTIN to verify.' });
+      return;
+    }
+
+    setVerifyingGstin(true);
+    setGstinMessage(null);
+
+    const result = await verifyGSTINOnline(form.gstin);
+    setVerifyingGstin(false);
+
+    if (result.valid) {
+      const businessName = result.tradeName || result.legalName;
+      setGstinMessage({
+        type: 'success',
+        text: `✓ Verified (${result.status || 'Active'}). ${businessName ? `Name: ${businessName}` : ''}`
+      });
+
+      setForm(prev => ({
+        ...prev,
+        name: businessName || prev.name,
+        state: result.state || prev.state,
+        city: result.city || prev.city,
+        address: result.address || prev.address,
+        pin: result.pincode || prev.pin,
+        is_sez: result.isSEZ !== undefined ? result.isSEZ : prev.is_sez
+      }));
+    } else {
+      setGstinMessage({
+        type: 'error',
+        text: result.error || 'Invalid GSTIN format or checksum.'
+      });
+    }
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     try {
@@ -31,6 +71,7 @@ export default function ClientsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('clients').insert([{ ...form, user_id: user.id }]);
       setModalOpen(false);
+      setGstinMessage(null);
       setForm({ name: '', address: '', city: '', state: '', pin: '', country: 'India', gstin: '', email: '', phone: '', is_sez: false });
       loadClients();
     } catch (err) {
@@ -42,7 +83,7 @@ export default function ClientsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3>Client Directory</h3>
-        <button onClick={() => setModalOpen(true)} className="btn btn-primary">
+        <button onClick={() => { setModalOpen(true); setGstinMessage(null); }} className="btn btn-primary">
           + Add Client
         </button>
       </div>
@@ -57,7 +98,7 @@ export default function ClientsPage() {
             <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>👥</div>
             <h3>No Clients Saved</h3>
             <p>Save clients to auto-fill details when creating invoices.</p>
-            <button onClick={() => setModalOpen(true)} className="btn btn-primary mt-4">
+            <button onClick={() => { setModalOpen(true); setGstinMessage(null); }} className="btn btn-primary mt-4">
               + Add First Client
             </button>
           </div>
@@ -100,24 +141,61 @@ export default function ClientsPage() {
             </div>
             <form onSubmit={handleSave}>
               <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <div className="input-group">
-                  <label>Business / Client Name *</label>
-                  <input type="text" className="input" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
-                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group">
-                    <label>GSTIN</label>
-                    <input type="text" className="input" placeholder="22AAAAA0000A1Z5" value={form.gstin} onChange={e => setForm({...form, gstin: e.target.value.toUpperCase()})} />
+                    <label>GSTIN (Optional)</label>
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="22AAAAA0000A1Z5"
+                        maxLength={15}
+                        value={form.gstin}
+                        onChange={e => setForm({...form, gstin: e.target.value.toUpperCase()})}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleVerifyGSTIN}
+                        disabled={verifyingGstin || !form.gstin}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        {verifyingGstin ? 'Verifying...' : 'Verify'}
+                      </button>
+                    </div>
+                    {gstinMessage && (
+                      <span style={{
+                        fontSize: '0.75rem',
+                        marginTop: '0.25rem',
+                        color: gstinMessage.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                        fontWeight: 600
+                      }}>
+                        {gstinMessage.text}
+                      </span>
+                    )}
                   </div>
+                  <div className="input-group">
+                    <label>Business / Client Name *</label>
+                    <input type="text" className="input" required value={form.name} onChange={e => setForm({...form, name: e.target.value})} />
+                  </div>
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group">
                     <label>State</label>
                     <input type="text" className="input" placeholder="e.g. Maharashtra" value={form.state} onChange={e => setForm({...form, state: e.target.value})} />
                   </div>
+                  <div className="input-group">
+                    <label>City</label>
+                    <input type="text" className="input" placeholder="e.g. Mumbai" value={form.city} onChange={e => setForm({...form, city: e.target.value})} />
+                  </div>
                 </div>
+
                 <div className="input-group">
                   <label>Address</label>
                   <input type="text" className="input" value={form.address} onChange={e => setForm({...form, address: e.target.value})} />
                 </div>
+
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group">
                     <label>Phone</label>
@@ -128,6 +206,7 @@ export default function ClientsPage() {
                     <input type="email" className="input" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
                   </div>
                 </div>
+
                 <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', cursor: 'pointer' }}>
                   <input type="checkbox" checked={form.is_sez} onChange={e => setForm({...form, is_sez: e.target.checked})} />
                   <span style={{ fontSize: '0.875rem' }}>This client is located in an SEZ (Special Economic Zone)</span>

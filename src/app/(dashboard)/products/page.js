@@ -2,11 +2,14 @@
 import { useState, useEffect } from 'react';
 import { getSupabase } from '@/lib/supabase/client';
 import { formatCurrency } from '@/lib/utils';
+import { verifyHSNCode } from '@/lib/hsn';
 
 export default function ProductsPage() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
+  const [hsnMessage, setHsnMessage] = useState(null);
+
   const [form, setForm] = useState({
     name: '', hsn_sac: '', rate: 0, tax_percent: 18, unit: 'Nos', stock: 0
   });
@@ -25,6 +28,31 @@ export default function ProductsPage() {
 
   useEffect(() => { loadProducts(); }, []);
 
+  const handleVerifyHSN = () => {
+    if (!form.hsn_sac) {
+      setHsnMessage({ type: 'error', text: 'Please enter an HSN or SAC code.' });
+      return;
+    }
+
+    const result = verifyHSNCode(form.hsn_sac);
+    if (result.valid) {
+      setHsnMessage({
+        type: 'success',
+        text: `✓ ${result.type} (${result.code}): ${result.description} [Recommended GST: ${result.recommendedRate}%]`
+      });
+
+      setForm(prev => ({
+        ...prev,
+        tax_percent: result.recommendedRate !== undefined ? result.recommendedRate : prev.tax_percent
+      }));
+    } else {
+      setHsnMessage({
+        type: 'error',
+        text: result.message
+      });
+    }
+  };
+
   const handleSave = async (e) => {
     e.preventDefault();
     try {
@@ -32,6 +60,7 @@ export default function ProductsPage() {
       const { data: { user } } = await supabase.auth.getUser();
       await supabase.from('products').insert([{ ...form, user_id: user.id }]);
       setModalOpen(false);
+      setHsnMessage(null);
       setForm({ name: '', hsn_sac: '', rate: 0, tax_percent: 18, unit: 'Nos', stock: 0 });
       loadProducts();
     } catch (err) {
@@ -43,7 +72,7 @@ export default function ProductsPage() {
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <h3>Product & Service Catalog</h3>
-        <button onClick={() => setModalOpen(true)} className="btn btn-primary">
+        <button onClick={() => { setModalOpen(true); setHsnMessage(null); }} className="btn btn-primary">
           + Add Item
         </button>
       </div>
@@ -58,7 +87,7 @@ export default function ProductsPage() {
             <div style={{ fontSize: '2.5rem', marginBottom: '1rem' }}>📦</div>
             <h3>No Products or Services Saved</h3>
             <p>Save items to quickly add them to invoices.</p>
-            <button onClick={() => setModalOpen(true)} className="btn btn-primary mt-4">
+            <button onClick={() => { setModalOpen(true); setHsnMessage(null); }} className="btn btn-primary mt-4">
               + Add Item
             </button>
           </div>
@@ -108,7 +137,34 @@ export default function ProductsPage() {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div className="input-group">
                     <label>HSN / SAC Code</label>
-                    <input type="text" className="input" placeholder="e.g. 9983" value={form.hsn_sac} onChange={e => setForm({...form, hsn_sac: e.target.value})} />
+                    <div style={{ display: 'flex', gap: '0.5rem' }}>
+                      <input
+                        type="text"
+                        className="input"
+                        placeholder="e.g. 9983 or 8471"
+                        value={form.hsn_sac}
+                        onChange={e => setForm({...form, hsn_sac: e.target.value})}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        onClick={handleVerifyHSN}
+                        disabled={!form.hsn_sac}
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        Verify
+                      </button>
+                    </div>
+                    {hsnMessage && (
+                      <span style={{
+                        fontSize: '0.75rem',
+                        marginTop: '0.25rem',
+                        color: hsnMessage.type === 'success' ? 'var(--success)' : 'var(--danger)',
+                        fontWeight: 600
+                      }}>
+                        {hsnMessage.text}
+                      </span>
+                    )}
                   </div>
                   <div className="input-group">
                     <label>Unit</label>
